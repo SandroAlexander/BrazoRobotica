@@ -11,6 +11,8 @@ Adafruit_PWMServoDriver s_pca(PCA9685_I2C_ADDRESS, Wire);
 bool     s_online = false;
 float    s_current[NUM_JOINTS];
 float    s_target[NUM_JOINTS];
+uint8_t  s_jointSpeedDps[NUM_JOINTS];
+bool     s_usePerJointSpeeds = false;
 uint16_t s_lastPulse[NUM_JOINTS];
 uint32_t s_lastUpdateMs = 0;
 uint32_t s_lastProbeMs = 0;
@@ -134,8 +136,10 @@ bool initPWM() {
   Wire.setTimeOut(25); // Prevent lockup if SDA/SCL lines are floating or disconnected
   for (uint8_t i = 0; i < NUM_JOINTS; ++i) {
     s_current[i] = s_target[i] = g_settings.joints[i].homeAngle;
+    s_jointSpeedDps[i] = 0;
     s_lastPulse[i] = 0;
   }
+  s_usePerJointSpeeds = false;
   s_online = probe();
   if (s_online) {
     configureChip();
@@ -152,20 +156,44 @@ bool initPWM() {
 
 bool pwmIsOnline() { return s_online; }
 
+void clearPerJointSpeeds() {
+  for (uint8_t i = 0; i < NUM_JOINTS; ++i) s_jointSpeedDps[i] = 0;
+  s_usePerJointSpeeds = false;
+}
+
 void setJointAngle(uint8_t id, float angle) {
   if (id >= NUM_JOINTS) return;
+  clearPerJointSpeeds();
   s_target[id] = clampToJoint(id, angle);
 }
 
 void setAllJointAngles(const float angles[NUM_JOINTS]) {
+  clearPerJointSpeeds();
   for (uint8_t i = 0; i < NUM_JOINTS; ++i) s_target[i] = clampToJoint(i, angles[i]);
 }
 
+void setJointAngleWithSpeed(uint8_t id, float angle, uint8_t speedDps) {
+  if (id >= NUM_JOINTS) return;
+  s_usePerJointSpeeds = true;
+  s_jointSpeedDps[id] = speedDps;
+  s_target[id] = clampToJoint(id, angle);
+}
+
+void setAllJointAnglesWithSpeeds(const float angles[NUM_JOINTS], const uint8_t speedsDps[NUM_JOINTS]) {
+  s_usePerJointSpeeds = true;
+  for (uint8_t i = 0; i < NUM_JOINTS; ++i) {
+    s_target[i] = clampToJoint(i, angles[i]);
+    s_jointSpeedDps[i] = speedsDps ? speedsDps[i] : 0;
+  }
+}
+
 void moveHome() {
+  clearPerJointSpeeds();
   for (uint8_t i = 0; i < NUM_JOINTS; ++i) s_target[i] = g_settings.joints[i].homeAngle;
 }
 
 void holdPosition() {
+  clearPerJointSpeeds();
   for (uint8_t i = 0; i < NUM_JOINTS; ++i) s_target[i] = s_current[i];
 }
 
@@ -218,16 +246,41 @@ void motionUpdate() {
     return;
   }
 
-  // Synchronized interpolation: every joint arrives at the same time
+  // Check if any joint needs to move
   float maxDelta = 0.0f;
   for (uint8_t i = 0; i < NUM_JOINTS; ++i) maxDelta = fmaxf(maxDelta, fabsf(s_target[i] - s_current[i]));
-  if (maxDelta < 0.01f) return;
+  if (maxDelta < 0.01f) {
+    s_usePerJointSpeeds = false;
+    return;
+  }
 
-  const float maxStep = g_settings.maxSpeedDps * (float)min<uint32_t>(dtMs, 100) / 1000.0f;
-  const float ratio = maxDelta <= maxStep ? 1.0f : maxStep / maxDelta;
-  for (uint8_t i = 0; i < NUM_JOINTS; ++i) {
-    s_current[i] += (s_target[i] - s_current[i]) * ratio;
-    if (ratio >= 1.0f) s_current[i] = s_target[i];
+  const float dtSec = (float)min<uint32_t>(dtMs, 100) / 1000.0f;
+
+  if (s_usePerJointSpeeds) {
+    // Per-articulation speed mode (used by movement queries): each joint moves at its own uint8_t speed (or global default if 0)
+    for (uint8_t i = 0; i < NUM_JOINTS; ++i) {
+      const float delta = s_target[i] - s_current[i];
+      const float absDelta = fabsf(delta);
+      if (absDelta < 0.01f) {
+        s_current[i] = s_target[i];
+        continue;
+      }
+      const float spd = s_jointSpeedDps[i] > 0 ? (float)s_jointSpeedDps[i] : g_settings.maxSpeedDps;
+      const float step = spd * dtSec;
+      if (absDelta <= step) {
+        s_current[i] = s_target[i];
+      } else {
+        s_current[i] += (delta > 0.0f ? step : -step);
+      }
+    }
+  } else {
+    // Synchronized interpolation: every joint arrives at the same time
+    const float maxStep = g_settings.maxSpeedDps * dtSec;
+    const float ratio = maxDelta <= maxStep ? 1.0f : maxStep / maxDelta;
+    for (uint8_t i = 0; i < NUM_JOINTS; ++i) {
+      s_current[i] += (s_target[i] - s_current[i]) * ratio;
+      if (ratio >= 1.0f) s_current[i] = s_target[i];
+    }
   }
   writeAll(false);
 }

@@ -46,29 +46,48 @@
 #define TELEMETRY_PERIOD_MS      200     // WebSocket status broadcast period
 
 // ---------------------------------------------------------------------
+//  Stored movement queries (NVS)
+//    50 queries * 30 bytes + 4-byte magic = 1,504 bytes (< 1.9 KB single-page NVS limit)
+// ---------------------------------------------------------------------
+#define MAX_STORED_QUERIES       50
+#define QUERY_NAME_MAX_LEN       10      // max 10 alphanumeric characters (+1 null terminator)
+#define QUERY_WILDCARD_TENTHS    (-1)    // '*' = hold current servo angle
+#define QUERY_DEFAULT_SPEED      0       // 0 = use global maxSpeedDps; 1..255 = specific joint °/s
+
+// ---------------------------------------------------------------------
 //  Safety
 // ---------------------------------------------------------------------
 #define EMERGENCY_LOCKOUT_MS     3000    // movement commands rejected for this long after E-STOP
 
 // ---------------------------------------------------------------------
-//  Kinematic model (millimetres)  [NVS]
-//    L0: table -> shoulder axis height
-//    L1: shoulder axis -> elbow axis
-//    L2: elbow axis -> hand (pitch) axis
-//    L3: hand axis -> gripper tip
+//  Kinematic model – Denavit-Hartenberg (DH) parameters  [NVS]
+//    alpha : link twist (degrees)
+//    a     : link length (mm)
+//    d     : link offset (mm)
+//    theta : joint angle offset theta_0 (degrees)
 // ---------------------------------------------------------------------
+struct DHParam {
+  float alpha;
+  float a;
+  float d;
+  float theta;
+};
+
 #define DEFAULT_LINK_L0          70.0f
 #define DEFAULT_LINK_L1          105.0f
 #define DEFAULT_LINK_L2          100.0f
 #define DEFAULT_LINK_L3          120.0f
 
-// Iterative IK solver (damped least squares)
-#define IK_MAX_ITERATIONS        150
-#define IK_POSITION_TOLERANCE_MM 1.0f
+// Differential Evolution IK solver defaults
+#define IK_DEFAULT_ITERATIONS    250
+#define IK_MAX_ITERATIONS_LIMIT  1000
+#define IK_DEFAULT_POPULATION    40
+#define IK_MAX_POPULATION_LIMIT  120
+#define IK_DE_MUTATION_K         0.6f    // mutation scaling factor K (F)
+#define IK_DE_CROSSOVER_CR       0.5f    // crossover probability CR in [0, 1]
+#define IK_POSITION_TOLERANCE_MM 0.5f    // convergence threshold (mm)
 #define IK_ORIENT_TOLERANCE      0.02f   // |approach vector error| (unitless)
-#define IK_DAMPING               8.0f    // lambda, larger = more stable / slower
 #define IK_ORIENT_WEIGHT         60.0f   // mm-equivalent weight of the orientation error
-#define IK_MAX_STEP_DEG          8.0f    // max. joint change per iteration
 
 // ---------------------------------------------------------------------
 //  Camera (AI-Thinker ESP32-CAM, OV2640)  [NVS]
@@ -113,6 +132,7 @@ struct JointCalibration {
 
 // Factory defaults (config.cpp)
 extern const JointCalibration DEFAULT_JOINT_CALIBRATIONS[NUM_JOINTS];
-extern const char* const JOINT_NAMES[NUM_JOINTS];
+extern const DHParam          DEFAULT_DH_PARAMS[NUM_JOINTS];
+extern const char* const      JOINT_NAMES[NUM_JOINTS];
 
 #endif // CONFIG_H

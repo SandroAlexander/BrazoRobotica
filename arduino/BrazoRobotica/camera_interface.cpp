@@ -55,6 +55,7 @@ esp_err_t streamHandler(httpd_req_t* req) {
     if (res == ESP_OK) res = httpd_resp_send_chunk(req, (const char*)fb->buf, fb->len);
     esp_camera_fb_return(fb);
     if (res != ESP_OK) break;   // client disconnected
+    vTaskDelay(pdMS_TO_TICKS(10)); // yield CPU & Wi-Fi airtime to AsyncTCP / WebSocket tasks
   }
   s_streaming = false;
   return res;
@@ -129,7 +130,9 @@ bool cameraApply(const CameraSettings& in) {
   sensor_t* sensor = esp_camera_sensor_get();
   if (!sensor) return false;
   bool ok = true;
-  ok &= sensor->set_framesize(sensor, (framesize_t)s.framesize) == 0;
+  if (sensor->status.framesize != (framesize_t)s.framesize) {
+    ok &= sensor->set_framesize(sensor, (framesize_t)s.framesize) == 0;
+  }
   ok &= sensor->set_quality(sensor, s.quality) == 0;
   ok &= sensor->set_brightness(sensor, s.brightness) == 0;
   ok &= sensor->set_contrast(sensor, s.contrast) == 0;

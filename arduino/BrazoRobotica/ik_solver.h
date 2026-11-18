@@ -2,55 +2,79 @@
 #define IK_SOLVER_H
 
 // =====================================================================
-//  Iterative inverse kinematics - damped least squares (Levenberg-Marquardt)
+//  Inverse Kinematics – Denavit-Hartenberg (4x4 Homogeneous Matrix) &
+//  Differential Evolution Solver
 //
 //  Pure C++ (no Arduino dependencies) so it can also be unit-tested on a PC.
 //
-//  Kinematic chain (base frame: Z up, X forward at base kinematic zero):
-//    J0 Base     - yaw   about Z
-//    J1 Shoulder - pitch (0 = link pointing straight up)
-//    J2 Elbow    - pitch relative to upper arm (0 = straight)
-//    J3 Wrist    - roll  about forearm axis   (kept fixed by the solver)
-//    J4 Hand     - pitch relative to forearm  (0 = straight)
-//    J5 Gripper  - not part of the kinematic chain
-//
 //  Joint angles exchanged with the solver are SERVO degrees; the mapping to
-//  kinematic angles uses JointCalibration::kinZero and ::kinDir:
-//      q_kin = (servoDeg - kinZero) * kinDir
+//  kinematic angles uses JointCalibration::kinZero and ::kinDir plus the
+//  Denavit-Hartenberg theta offset:
+//      theta_eff_deg = (servoDeg - kinZero) * kinDir + dh[i].theta
 // =====================================================================
 
 #include "config.h"
 
+// 4x4 Homogeneous transformation matrix
+struct Mat4 {
+  float m[4][4];
+};
+
+// Kinematic model stored as 6 Denavit-Hartenberg rows (alpha, a, d, theta)
 struct KinematicModel {
-  float L0;   // base -> shoulder height (mm)
-  float L1;   // upper arm (mm)
-  float L2;   // forearm (mm)
-  float L3;   // hand + gripper (mm)
+  DHParam dh[NUM_JOINTS];
 };
 
 struct IKTarget {
-  float x, y, z;          // tool tip position, mm
+  float x, y, z;          // desired tool-tip position (mm)
   bool  useOrientation;   // also constrain the tool approach direction
   float pitchDeg;         // approach angle vs. horizontal (-90 = pointing down)
+  int   iterations;       // Differential Evolution max iterations (0 = default)
+  int   population;       // Differential Evolution population size P (0 = default)
+  bool  lockGripper;      // keep J5 (Gripper) at current seed angle
 };
 
 struct IKResult {
   bool  success;
-  int   iterations;              // total iterations over all attempts
-  float positionError;           // mm
+  int   iterations;              // iterations executed
+  int   population;              // population size used
+  float positionError;           // Euclidean 3D distance to target (mm)
   float orientationError;        // |a_desired - a| (0 when not used)
-  float angles[NUM_JOINTS];      // servo degrees (always within limits)
+  float angles[NUM_JOINTS];      // solved servo degrees (always within limits)
 };
 
-// Forward kinematics. pos: tool tip (mm). approach (optional, may be null): unit tool axis.
+// Build a single 4x4 Denavit-Hartenberg homogeneous matrix from (alpha, a, d, theta)
+// with alpha and theta in degrees, a and d in millimetres.
+Mat4 dhMatrix(float alphaDeg, float a, float d, float thetaDeg);
+
+// Multiply two 4x4 homogeneous matrices: R = A * B
+Mat4 mat4Mul(const Mat4& A, const Mat4& B);
+
+// Forward kinematics using the 6-joint Denavit-Hartenberg chain.
+// - pos[3]              : tool tip (x, y, z) in mm
+// - approach[3]         : optional (may be nullptr) unit tool approach axis (Z_6)
+// - relOrigins[6][3]    : optional (may be nullptr) 3D origin vector (dx, dy, dz)
+//                         of each bone relative to the previous bone in the chain
 void ikForward(const float servoDeg[NUM_JOINTS],
                const JointCalibration cal[NUM_JOINTS],
                const KinematicModel& model,
-               float pos[3], float approach[3]);
+               float pos[3],
+               float approach[3],
+               float relOrigins[NUM_JOINTS][3] = nullptr);
 
-// Iterative IK. 'seed' is normally the current joint state (gives the
-// closest solution and smooth motion). Joints 3 (wrist roll) and 5
-// (gripper) are copied from the seed unchanged.
+// Core Differential Evolution solver:
+//   solve(px, py, pz, iterations, population, ...) -> outAngles[NUM_JOINTS]
+// Returns true if final position error <= IK_POSITION_TOLERANCE_MM.
+bool solve(float px, float py, float pz,
+           int iterations, int population,
+           const float seed[NUM_JOINTS],
+           const JointCalibration cal[NUM_JOINTS],
+           const KinematicModel& model,
+           float outAngles[NUM_JOINTS],
+           IKResult* outDetail = nullptr,
+           const IKTarget* fullTarget = nullptr);
+
+// High-level IK entry point used by the robot controller.
 IKResult ikSolve(const IKTarget& target,
                  const float seed[NUM_JOINTS],
                  const JointCalibration cal[NUM_JOINTS],

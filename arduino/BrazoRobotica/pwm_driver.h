@@ -16,6 +16,9 @@ bool  pwmIsOnline();                              // PCA9685 answered on the I2C
 
 void  setJointAngle(uint8_t jointId, float angle);    // clamped to calibration limits
 void  setAllJointAngles(const float angles[NUM_JOINTS]);
+void  setJointAngleWithSpeed(uint8_t jointId, float angle, uint8_t speedDps);
+void  setAllJointAnglesWithSpeeds(const float angles[NUM_JOINTS], const uint8_t speedsDps[NUM_JOINTS]);
+void  clearPerJointSpeeds();
 void  moveHome();
 void  holdPosition();                             // target = current position (E-STOP)
 

@@ -86,11 +86,15 @@ void onWsEvent(AsyncWebSocket* server, AsyncWebSocketClient* client, AwsEventTyp
 }
 
 void setupRoutes() {
-  s_server.on("/", HTTP_GET, [](AsyncWebServerRequest* req) {
+  auto sendUi = [](AsyncWebServerRequest* req) {
     AsyncWebServerResponse* r = req->beginResponse_P(200, "text/html", (const uint8_t*)WEB_UI_HTML, strlen(WEB_UI_HTML));
     r->addHeader("Cache-Control", "no-cache");
     req->send(r);
-  });
+  };
+  s_server.on("/", HTTP_GET, sendUi);
+  s_server.on("/queries", HTTP_GET, sendUi);
+  s_server.on("/ik", HTTP_GET, sendUi);
+  s_server.on("/settings", HTTP_GET, sendUi);
 
   // Single JPEG frame
   s_server.on("/capture", HTTP_GET, [](AsyncWebServerRequest* req) {

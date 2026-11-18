@@ -17,3 +17,16 @@ const JointCalibration DEFAULT_JOINT_CALIBRATIONS[NUM_JOINTS] = {
 const char* const JOINT_NAMES[NUM_JOINTS] = {
   "Base", "Shoulder", "Elbow", "Wrist", "Hand", "Gripper"
 };
+
+// Default Denavit-Hartenberg parameters (alpha deg, a mm, d mm, theta_0 deg)
+// Matches the 6-DOF arm geometry (L0=70, L1=105, L2=100, L3=120) so that at
+// kinematic zero (all q_i = 0) the arm points straight up at (0, 0, 395 mm).
+const DHParam DEFAULT_DH_PARAMS[NUM_JOINTS] = {
+  // alpha    a               d                theta
+  { -90.0f,   0.0f,           DEFAULT_LINK_L0,   0.0f }, // J0 Base
+  {   0.0f,   DEFAULT_LINK_L1, 0.0f,           -90.0f }, // J1 Shoulder
+  {  90.0f,   0.0f,           0.0f,             90.0f }, // J2 Elbow
+  { -90.0f,   0.0f,           DEFAULT_LINK_L2,   0.0f }, // J3 Wrist
+  {  90.0f,   0.0f,           0.0f,              0.0f }, // J4 Hand
+  {   0.0f,   0.0f,           DEFAULT_LINK_L3,   0.0f }  // J5 Gripper / Tool
+};
